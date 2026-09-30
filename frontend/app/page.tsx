@@ -1,6 +1,7 @@
 "use client";
 
 import { ChangeEvent, DragEvent, useRef, useState } from "react";
+import { uploadCropImage } from "../lib/api";
 
 export default function Home() {
   const [selectedImage, setSelectedImage] = useState<File | null>(null);
@@ -94,8 +95,8 @@ export default function Home() {
     fileInputRef.current?.click();
   };
 
-  // Analyze image
-  const handleAnalyze = () => {
+  // Upload image to backend
+  const handleAnalyze = async () => {
     if (!selectedImage) {
       setError("Please select a crop image first.");
       return;
@@ -104,13 +105,23 @@ export default function Home() {
     setError("");
     setIsAnalyzing(true);
 
-    setTimeout(() => {
+    try {
+      const result = await uploadCropImage(selectedImage);
+
       setIsAnalyzing(false);
 
       alert(
-        "Image is ready for analysis. Backend API integration will be added during the frontend-backend integration sprint."
+        `Image uploaded successfully!\n\nPrediction ID: ${result.prediction_id}\nStatus: ${result.status}`
       );
-    }, 1500);
+    } catch (error) {
+      console.error("Crop image upload failed:", error);
+
+      setIsAnalyzing(false);
+
+      setError(
+        "Unable to upload the crop image. Please make sure the backend server is running."
+      );
+    }
   };
 
   return (
@@ -367,7 +378,9 @@ export default function Home() {
                         disabled={isAnalyzing}
                         className="rounded-xl bg-green-600 px-5 py-3 font-semibold text-white transition hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-70"
                       >
-                        {isAnalyzing ? "Analyzing Image..." : "Analyze Crop →"}
+                        {isAnalyzing
+                          ? "Uploading Image..."
+                          : "Analyze Crop →"}
                       </button>
                     </div>
 

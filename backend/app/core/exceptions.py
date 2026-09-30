@@ -43,9 +43,9 @@ class InvalidImageError(AppError):
 
 
 class FileTooLargeError(AppError):
-    status_code = status.HTTP_413_REQUEST_ENTITY_TOO_LARGE
+    status_code = getattr(status, "HTTP_413_CONTENT_TOO_LARGE", 413)
     code = "FILE_TOO_LARGE"
-    default_message = "The uploaded file is too large."
+    default_message = "Uploaded file exceeds the maximum allowed size."
 
 
 class StorageError(AppError):
@@ -69,13 +69,16 @@ class DiseaseNotFoundError(AppError):
 class ModelNotAvailableError(AppError):
     status_code = status.HTTP_503_SERVICE_UNAVAILABLE
     code = "MODEL_NOT_AVAILABLE"
-    default_message = "The ML model is not available yet."
+    default_message = "The disease prediction model is not available."
 
 
-class FeatureNotImplementedError(AppError):
+class NotImplementedFeatureError(AppError):
     status_code = status.HTTP_501_NOT_IMPLEMENTED
     code = "NOT_IMPLEMENTED"
     default_message = "This feature is not implemented yet."
+
+
+FeatureNotImplementedError = NotImplementedFeatureError
 
 
 # ---------------------------------------------------------------------------
@@ -93,10 +96,8 @@ _HTTP_CODE_MAP = {
 
 
 def _error_payload(code: str, message: str, details: Any = None) -> dict[str, Any]:
-    payload: dict[str, Any] = {"error": {"code": code, "message": message}}
-    if details is not None:
-        payload["error"]["details"] = details
-    return payload
+    """Build the standard error envelope (details always present)."""
+    return {"error": {"code": code, "message": message, "details": details}}
 
 
 def register_exception_handlers(app: FastAPI) -> None:
@@ -117,7 +118,7 @@ def register_exception_handlers(app: FastAPI) -> None:
         request: Request, exc: RequestValidationError
     ) -> JSONResponse:
         return JSONResponse(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=getattr(status, "HTTP_422_UNPROCESSABLE_CONTENT", 422),
             content=_error_payload(
                 "VALIDATION_ERROR",
                 "Request validation failed.",

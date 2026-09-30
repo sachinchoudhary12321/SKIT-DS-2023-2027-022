@@ -30,7 +30,7 @@ router = APIRouter(prefix="/recommendations", tags=["recommendations"])
             "model": ErrorResponse,
             "description": "Recommendation engine not implemented yet",
         },
-        status.HTTP_422_UNPROCESSABLE_ENTITY: {
+        getattr(status, "HTTP_422_UNPROCESSABLE_CONTENT", 422): {
             "model": ErrorResponse,
             "description": "Malformed request body",
         },

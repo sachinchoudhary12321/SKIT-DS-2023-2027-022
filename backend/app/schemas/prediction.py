@@ -20,33 +20,20 @@ class PredictionCreatedResponse(BaseModel):
     )
 
 
-class PredictionImageInfo(BaseModel):
-    """Metadata about the stored image (no paths, no original filename)."""
-
-    filename: str
-    content_type: str
-    size_bytes: int
-
-
 class PredictionResponse(BaseModel):
     """Returned by GET /api/v1/predictions/{prediction_id}.
 
-    `crop`, `disease` and `confidence` remain `null` until the status becomes
-    `completed` (i.e. after the real ML model is connected). Nothing is
-    invented in the meantime.
+    `crop`, `disease` and `confidence` remain null until the status becomes
+    `completed` (after the real ML model is connected). No results are
+    invented before then.
     """
 
     prediction_id: UUID
     status: PredictionStatus
-    image: PredictionImageInfo
-    crop: str | None = None
-    disease: str | None = None
+    crop: str | None = Field(default=None, examples=[None])
+    disease: str | None = Field(default=None, examples=[None])
     confidence: float | None = Field(default=None, ge=0.0, le=1.0)
-    error_code: str | None = Field(
-        default=None, description="Set only when status == 'failed'."
-    )
     created_at: datetime
-    updated_at: datetime
 
     @classmethod
     def from_record(cls, record: PredictionRecord) -> "PredictionResponse":
@@ -54,15 +41,8 @@ class PredictionResponse(BaseModel):
         return cls(
             prediction_id=record.prediction_id,
             status=record.status,
-            image=PredictionImageInfo(
-                filename=record.stored_filename,
-                content_type=record.content_type,
-                size_bytes=record.size_bytes,
-            ),
             crop=record.crop,
             disease=record.disease,
             confidence=record.confidence,
-            error_code=record.error_code,
             created_at=record.created_at,
-            updated_at=record.updated_at,
         )

@@ -39,7 +39,7 @@ DiseaseName = Annotated[
             "model": ErrorResponse,
             "description": "Disease not found in the catalogue",
         },
-        status.HTTP_422_UNPROCESSABLE_ENTITY: {
+        getattr(status, "HTTP_422_UNPROCESSABLE_CONTENT", 422): {
             "model": ErrorResponse,
             "description": "Malformed disease name",
         },

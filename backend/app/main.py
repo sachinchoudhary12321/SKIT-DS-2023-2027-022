@@ -81,6 +81,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         predictor=predictor,
     )
     disease_service = DiseaseService(repository=InMemoryDiseaseRepository())
+    recommendation_service = RecommendationService()
 
     app = FastAPI(
         title="Crop Care Crop API",
@@ -97,17 +98,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.predictor = predictor
     app.state.prediction_service = prediction_service
     app.state.disease_service = disease_service
-    app.state.recommendation_service = RecommendationService()
+    app.state.recommendation_service = recommendation_service
 
     # Middleware — LAST added runs FIRST (outermost).
+    app.add_middleware(RequestLoggingMiddleware)   # inner
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origin_list,
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
-    )
-    app.add_middleware(RequestLoggingMiddleware)
+    )                                               # outer
 
     register_exception_handlers(app)
     app.include_router(api_v1_router, prefix=settings.api_v1_prefix)

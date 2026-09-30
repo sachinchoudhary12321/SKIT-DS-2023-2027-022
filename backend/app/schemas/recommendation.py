@@ -8,11 +8,17 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class RecommendationContext(BaseModel):
-    """Optional extra context provided by the client."""
+    """Optional extra context provided by the client.
+
+    Extra fields are accepted so the contract can grow without a breaking
+    change (e.g. weather, irrigation, soil data added later).
+    """
+
+    model_config = ConfigDict(extra="allow")
 
     location: str | None = Field(default=None, max_length=200)
     growth_stage: str | None = Field(default=None, max_length=100)

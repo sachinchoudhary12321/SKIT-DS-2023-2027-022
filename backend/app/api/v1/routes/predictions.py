@@ -35,7 +35,7 @@ PredictionId = Annotated[
         "once the ML model is connected — track progress via GET /predictions/{id}."
     ),
     responses={
-        status.HTTP_413_REQUEST_ENTITY_TOO_LARGE: {
+        getattr(status, "HTTP_413_CONTENT_TOO_LARGE", 413): {
             "model": ErrorResponse,
             "description": "Image exceeds the size limit",
         },
@@ -43,7 +43,7 @@ PredictionId = Annotated[
             "model": ErrorResponse,
             "description": "Not a supported image",
         },
-        status.HTTP_422_UNPROCESSABLE_ENTITY: {
+        getattr(status, "HTTP_422_UNPROCESSABLE_CONTENT", 422): {
             "model": ErrorResponse,
             "description": "Missing or malformed request",
         },
@@ -79,7 +79,7 @@ async def create_prediction(
             "model": ErrorResponse,
             "description": "Unknown prediction id",
         },
-        status.HTTP_422_UNPROCESSABLE_ENTITY: {
+        getattr(status, "HTTP_422_UNPROCESSABLE_CONTENT", 422): {
             "model": ErrorResponse,
             "description": "Malformed prediction id",
         },

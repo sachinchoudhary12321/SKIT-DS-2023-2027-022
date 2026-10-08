@@ -1,4 +1,4 @@
-const API_BASE_URL = "http://127.0.0.1:8000/api/v1";
+﻿const API_BASE_URL = "http://127.0.0.1:8000/api/v1";
 
 export async function uploadCropImage(file: File) {
   const formData = new FormData();
@@ -26,4 +26,20 @@ export async function getPrediction(predictionId: string) {
   }
 
   return response.json();
+}
+
+export async function checkBackendHealth(): Promise<{ status: string; healthy: boolean }> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/health`, {
+      method: "GET",
+      cache: "no-store",
+    });
+    if (!response.ok) {
+      return { status: "offline", healthy: false };
+    }
+    const data = await response.json();
+    return { status: data.status || "ok", healthy: true };
+  } catch {
+    return { status: "offline", healthy: false };
+  }
 }

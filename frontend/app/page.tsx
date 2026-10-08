@@ -3,6 +3,7 @@
 import { ChangeEvent, DragEvent, useRef, useState } from "react";
 import Link from "next/link";
 import { uploadCropImage } from "../lib/api";
+import { validateCropImage } from "../lib/imageValidation";
 
 interface PredictionResult {
   prediction_id: string;
@@ -16,13 +17,16 @@ export default function Home() {
   const [error, setError] = useState("");
   const [isDragging, setIsDragging] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [isValidating, setIsValidating] = useState(false);
+  const [qualityError, setQualityError] = useState<string | null>(null);
   const [predictionResult, setPredictionResult] = useState<PredictionResult | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Validate and select crop image
-  const validateAndSetImage = (file: File) => {
+  const validateAndSetImage = async (file: File) => {
     setError("");
+    setQualityError(null);
     setPredictionResult(null);
 
     const allowedTypes = ["image/jpeg", "image/jpg", "image/png"];
@@ -53,28 +57,38 @@ export default function Home() {
 
       return imageUrl;
     });
+
+    // Run client-side crop & leaf validation
+    setIsValidating(true);
+    const validation = await validateCropImage(file);
+    setIsValidating(false);
+
+    if (!validation.isValid) {
+      setQualityError(validation.error || "Invalid image detected.");
+      setError(validation.error || "The image lacks visible crop features.");
+    }
   };
 
   // Handle normal file selection
-  const handleFileChange = (event: ChangeEvent<HTMLInputElement>) => {
+  const handleFileChange = async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
 
     if (file) {
-      validateAndSetImage(file);
+      await validateAndSetImage(file);
     }
 
     event.target.value = "";
   };
 
   // Handle drag and drop
-  const handleDrop = (event: DragEvent<HTMLDivElement>) => {
+  const handleDrop = async (event: DragEvent<HTMLDivElement>) => {
     event.preventDefault();
     setIsDragging(false);
 
     const file = event.dataTransfer.files?.[0];
 
     if (file) {
-      validateAndSetImage(file);
+      await validateAndSetImage(file);
     }
   };
 
@@ -91,7 +105,9 @@ export default function Home() {
     });
 
     setError("");
+    setQualityError(null);
     setIsAnalyzing(false);
+    setIsValidating(false);
     setPredictionResult(null);
 
     if (fileInputRef.current) {
@@ -108,6 +124,11 @@ export default function Home() {
   const handleAnalyze = async () => {
     if (!selectedImage) {
       setError("Please select a crop image first.");
+      return;
+    }
+
+    if (qualityError) {
+      setError("Cannot analyze: The uploaded photo appears to be blank or lacks plant foliage. Please upload a clear photo of an actual crop leaf.");
       return;
     }
 
@@ -356,13 +377,30 @@ export default function Home() {
               <div className="rounded-3xl border border-green-100 bg-green-50/50 p-6 md:p-8">
                 <div className="grid gap-8 md:grid-cols-2">
                   {/* Preview */}
-                  <div className="overflow-hidden rounded-2xl bg-slate-100">
+                  <div className="relative overflow-hidden rounded-2xl bg-slate-100">
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img
                       src={preview}
                       alt="Selected crop"
                       className="h-56 w-full object-cover sm:h-72 md:h-80"
                     />
+
+                    {/* Image quality badge */}
+                    <div className="absolute bottom-2 left-2">
+                      {isValidating ? (
+                        <span className="rounded-md bg-slate-900/80 px-2 py-1 text-[11px] font-medium text-white backdrop-blur">
+                          Scanning image quality...
+                        </span>
+                      ) : qualityError ? (
+                        <span className="flex items-center gap-1 rounded-md bg-red-600/90 px-2 py-1 text-[11px] font-semibold text-white shadow backdrop-blur">
+                          <span>⚠️</span> Blank / No Leaf
+                        </span>
+                      ) : (
+                        <span className="flex items-center gap-1 rounded-md bg-emerald-600/90 px-2 py-1 text-[11px] font-semibold text-white shadow backdrop-blur">
+                          <span>✓</span> Leaf Foliage Verified
+                        </span>
+                      )}
+                    </div>
                   </div>
 
                   {/* Image Information */}
@@ -386,7 +424,7 @@ export default function Home() {
                       <button
                         type="button"
                         onClick={openFilePicker}
-                        disabled={isAnalyzing}
+                        disabled={isAnalyzing || isValidating}
                         className="rounded-xl border border-green-200 bg-white px-5 py-3 font-semibold text-green-700 transition hover:bg-green-50 disabled:cursor-not-allowed disabled:opacity-50"
                       >
                         Change Image
@@ -396,14 +434,22 @@ export default function Home() {
                       <button
                         type="button"
                         onClick={handleAnalyze}
-                        disabled={isAnalyzing}
-                        className="flex items-center justify-center gap-2 rounded-xl bg-green-600 px-5 py-3 font-semibold text-white transition hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-70"
+                        disabled={isAnalyzing || isValidating || !!qualityError}
+                        className={`flex items-center justify-center gap-2 rounded-xl px-5 py-3 font-semibold text-white transition ${
+                          qualityError
+                            ? "cursor-not-allowed bg-slate-400 opacity-60"
+                            : "bg-green-600 hover:bg-green-700 disabled:opacity-70"
+                        }`}
                       >
                         {isAnalyzing ? (
                           <>
                             <span className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
                             <span>Uploading & Analyzing...</span>
                           </>
+                        ) : isValidating ? (
+                          <span>Checking quality...</span>
+                        ) : qualityError ? (
+                          <span>Upload a real crop image</span>
                         ) : (
                           <span>Analyze Crop 🔬</span>
                         )}
@@ -414,7 +460,7 @@ export default function Home() {
                     <button
                       type="button"
                       onClick={removeImage}
-                      disabled={isAnalyzing}
+                      disabled={isAnalyzing || isValidating}
                       className="mt-4 text-left text-sm font-medium text-red-500 transition hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       Remove image

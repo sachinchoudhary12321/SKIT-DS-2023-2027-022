@@ -3,6 +3,7 @@
 import { ChangeEvent, DragEvent, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { checkBackendHealth, uploadCropImage } from "../../lib/api";
+import { validateCropImage } from "../../lib/imageValidation";
 
 interface ScanRecord {
   id: string;
@@ -79,6 +80,8 @@ export default function FarmerDashboard() {
   const [selectedImage, setSelectedImage] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
   const [isScanning, setIsScanning] = useState(false);
+  const [isValidating, setIsValidating] = useState(false);
+  const [imageQualityError, setImageQualityError] = useState<string | null>(null);
   const [scanMessage, setScanMessage] = useState<{ text: string; isError: boolean } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -114,24 +117,26 @@ export default function FarmerDashboard() {
   }, []);
 
   // Handle image selection
-  const handleFileChange = (e: ChangeEvent<HTMLInputElement>) => {
+  const handleFileChange = async (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      handleSetFile(file);
+      await handleSetFile(file);
     }
     e.target.value = "";
   };
 
-  const handleDrop = (e: DragEvent<HTMLDivElement>) => {
+  const handleDrop = async (e: DragEvent<HTMLDivElement>) => {
     e.preventDefault();
     const file = e.dataTransfer.files?.[0];
     if (file) {
-      handleSetFile(file);
+      await handleSetFile(file);
     }
   };
 
-  const handleSetFile = (file: File) => {
+  const handleSetFile = async (file: File) => {
     setScanMessage(null);
+    setImageQualityError(null);
+
     if (!["image/jpeg", "image/jpg", "image/png"].includes(file.type)) {
       setScanMessage({ text: "Please upload a JPG, JPEG, or PNG image.", isError: true });
       return;
@@ -140,12 +145,26 @@ export default function FarmerDashboard() {
       setScanMessage({ text: "Image exceeds 10MB limit.", isError: true });
       return;
     }
+
     setSelectedImage(file);
     const url = URL.createObjectURL(file);
     setPreview((prev) => {
       if (prev) URL.revokeObjectURL(prev);
       return url;
     });
+
+    // Run client-side crop & leaf validation
+    setIsValidating(true);
+    const validation = await validateCropImage(file);
+    setIsValidating(false);
+
+    if (!validation.isValid) {
+      setImageQualityError(validation.error || "Invalid image detected.");
+      setScanMessage({
+        text: validation.error || "Invalid image: lacks plant/leaf features.",
+        isError: true,
+      });
+    }
   };
 
   const clearSelectedImage = () => {
@@ -155,12 +174,24 @@ export default function FarmerDashboard() {
       return null;
     });
     setScanMessage(null);
+    setImageQualityError(null);
     setIsScanning(false);
+    setIsValidating(false);
   };
 
   // Run Scan / Upload to Backend
   const handleRunScan = async () => {
     if (!selectedImage) return;
+
+    // Strict validation check: refuse blank/invalid images
+    if (imageQualityError) {
+      setScanMessage({
+        text: "Cannot analyze: Please upload a clear photo of an actual crop leaf instead of a blank or non-crop image.",
+        isError: true,
+      });
+      return;
+    }
+
     setIsScanning(true);
     setScanMessage(null);
 
@@ -168,7 +199,10 @@ export default function FarmerDashboard() {
       const response = await uploadCropImage(selectedImage);
       setIsScanning(false);
 
-      const predictionId = typeof response?.prediction_id === "string" ? response.prediction_id.slice(0, 8) : Date.now().toString().slice(-6);
+      const predictionId =
+        typeof response?.prediction_id === "string"
+          ? response.prediction_id.slice(0, 8)
+          : Date.now().toString().slice(-6);
 
       // Create new diagnostic record
       const newScan: ScanRecord = {
@@ -191,23 +225,9 @@ export default function FarmerDashboard() {
       });
     } catch {
       setIsScanning(false);
-      // Fallback in demo/local mode so farmer experience never breaks
-      const demoScan: ScanRecord = {
-        id: `CC-LOCAL-${Math.floor(1000 + Math.random() * 9000)}`,
-        crop: "Wheat (Triticum aestivum)",
-        disease: "Wheat Stripe Rust (Suspected)",
-        confidence: 92.4,
-        date: "Today, Just now",
-        severity: "high",
-        status: "Under Treatment",
-        treatment: "Propiconazole 25% EC spray (1ml/L). Inspect leaf margins within 24 hours.",
-        organicAlt: "Neem oil formulation 5ml/L spray with morning sunlight.",
-      };
-      setScans((prev) => [demoScan, ...prev]);
-      setSelectedScan(demoScan);
       setScanMessage({
-        text: "Backend API offline (Mock Model Used). Added diagnostic to your dashboard history.",
-        isError: false,
+        text: "Backend API is currently offline. Please ensure the backend server is running on port 8000.",
+        isError: true,
       });
     }
   };
@@ -226,7 +246,6 @@ export default function FarmerDashboard() {
     setChatMessages((prev) => [...prev, userMsg]);
     if (!textToSend) setChatInput("");
 
-    // Auto-reply based on agronomic knowledge
     setTimeout(() => {
       let botResponse = "Our agronomy model recommends scouting leaf undersides and ensuring soil aeration under current weather conditions.";
       const lower = text.toLowerCase();
@@ -302,7 +321,7 @@ export default function FarmerDashboard() {
                 {backendStatus === "online"
                   ? "FastAPI ML Engine: Connected"
                   : backendStatus === "offline"
-                  ? "FastAPI ML: Standby Mode"
+                  ? "FastAPI ML: Offline"
                   : "Checking Backend..."}
               </span>
             </div>
@@ -389,7 +408,7 @@ export default function FarmerDashboard() {
               <span className="text-3xl font-extrabold text-blue-700">{scans.length}</span>
               <span className="text-xs text-slate-500">AI Analyses</span>
             </div>
-            <p className="mt-2 text-xs text-slate-500">3 required treatment, all tracked</p>
+            <p className="mt-2 text-xs text-slate-500">Tracked in farm record</p>
           </div>
 
           <div className="rounded-2xl border border-purple-100 bg-white p-5 shadow-sm transition hover:shadow-md">
@@ -502,24 +521,57 @@ export default function FarmerDashboard() {
                     />
                     <button
                       onClick={clearSelectedImage}
-                      disabled={isScanning}
+                      disabled={isScanning || isValidating}
                       className="absolute right-2 top-2 rounded-lg bg-black/60 px-2.5 py-1 text-xs font-medium text-white backdrop-blur transition hover:bg-black/80"
                     >
                       Change
                     </button>
+
+                    {/* Image validation badge indicator */}
+                    <div className="absolute bottom-2 left-2">
+                      {isValidating ? (
+                        <span className="rounded-md bg-slate-900/80 px-2 py-1 text-[11px] font-medium text-white backdrop-blur">
+                          Scanning image quality...
+                        </span>
+                      ) : imageQualityError ? (
+                        <span className="flex items-center gap-1 rounded-md bg-red-600/90 px-2 py-1 text-[11px] font-semibold text-white shadow backdrop-blur">
+                          <span>⚠️</span> Invalid Image (No Leaf)
+                        </span>
+                      ) : (
+                        <span className="flex items-center gap-1 rounded-md bg-emerald-600/90 px-2 py-1 text-[11px] font-semibold text-white shadow backdrop-blur">
+                          <span>✓</span> Foliage Verified
+                        </span>
+                      )}
+                    </div>
                   </div>
+
+                  {/* Quality Error Banner if blank image */}
+                  {imageQualityError && (
+                    <div className="rounded-xl border border-red-300 bg-red-50 p-3 text-xs leading-relaxed text-red-800">
+                      <strong className="block font-bold">Image Rejected:</strong>
+                      {imageQualityError}
+                    </div>
+                  )}
 
                   <div className="flex gap-2">
                     <button
                       onClick={handleRunScan}
-                      disabled={isScanning}
-                      className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-green-600 py-2.5 text-sm font-semibold text-white shadow-sm shadow-green-200 transition hover:bg-green-700 disabled:opacity-60"
+                      disabled={isScanning || isValidating || !!imageQualityError}
+                      className={`flex flex-1 items-center justify-center gap-2 rounded-xl py-2.5 text-sm font-semibold text-white shadow-sm transition ${
+                        imageQualityError
+                          ? "cursor-not-allowed bg-slate-400 opacity-60"
+                          : "bg-green-600 shadow-green-200 hover:bg-green-700"
+                      }`}
                     >
                       {isScanning ? (
                         <>
                           <span className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
                           <span>Analyzing with AI...</span>
                         </>
+                      ) : isValidating ? (
+                        <span>Validating image...</span>
+                      ) : imageQualityError ? (
+                        <span>Upload a real crop image</span>
                       ) : (
                         <>
                           <span>⚡</span>
@@ -529,7 +581,7 @@ export default function FarmerDashboard() {
                     </button>
                     <button
                       onClick={clearSelectedImage}
-                      disabled={isScanning}
+                      disabled={isScanning || isValidating}
                       className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-xs font-semibold text-slate-600 transition hover:bg-slate-50"
                     >
                       Reset
@@ -538,7 +590,7 @@ export default function FarmerDashboard() {
                 </div>
               )}
 
-              {scanMessage && (
+              {scanMessage && !imageQualityError && (
                 <div
                   className={`mt-3 rounded-lg p-3 text-xs font-medium ${
                     scanMessage.isError

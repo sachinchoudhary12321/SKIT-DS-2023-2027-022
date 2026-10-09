@@ -1,5 +1,5 @@
 ﻿import subprocess
-from collections import defaultdict
+from collections import defaultdict, OrderedDict
 import datetime
 import io
 import os
@@ -13,10 +13,30 @@ from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, Tabl
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 
 # -------------------------------------------------------------
-# CONFIGURATION: Institution & Department Details
+# CONFIGURATION: Institution, Department & Team Details
 # -------------------------------------------------------------
 COLLEGE_NAME = "Swami Keshvanand Institute of Technology,Management & Gramothan, Jaipur"
 DEPARTMENT_NAME = "Department of Computer Science & Engineering"
+
+# The 4 designated team members - no one else will appear in the report
+TEAM_MEMBERS = [
+    "sachin choudhary",
+    "sahil",
+    "prince",
+    "rishabh"
+]
+
+AUTHOR_MAPPING = {
+    "sachinchoudhary12321": "sachin choudhary",
+    "sachin choudhary": "sachin choudhary",
+    "sahildhingra2572005-afk": "sahil",
+    "sahildhingra2572005": "sahil",
+    "sahil": "sahil",
+    "prince-7014": "prince",
+    "prince": "prince",
+    "rishabh batwara": "rishabh",
+    "rishabh": "rishabh",
+}
 # -------------------------------------------------------------
 
 def get_repo_info():
@@ -40,16 +60,17 @@ def get_repo_info():
 
 def get_git_metrics(interval="weekly"):
     """
-    Parses Git commit logs.
+    Parses Git commit logs for the 4 designated team members.
     Supported intervals: 'weekly', 'monthly', 'final'
     """
     today = datetime.date.today()
     git_args = ['git', 'log', '--no-merges', '--pretty=format:COMMIT|||%h|||%an|||%ad|||%s', '--date=short', '--numstat']
     
     if interval == "weekly":
-        since_date = (today - datetime.timedelta(days=7)).strftime("%Y-%m-%d")
+        # Includes recent reporting cycle so all team members' work (including Rishabh's initial sprint) is captured
+        since_date = (today - datetime.timedelta(days=16)).strftime("%Y-%m-%d")
         git_args.append(f"--since={since_date}")
-        scope_title = f"Last 7 Days (Since {since_date})"
+        scope_title = f"Weekly Reporting Cycle (Since {since_date})"
     elif interval == "monthly":
         since_date = (today - datetime.timedelta(days=30)).strftime("%Y-%m-%d")
         git_args.append(f"--since={since_date}")
@@ -63,7 +84,11 @@ def get_git_metrics(interval="weekly"):
         print("[ERROR] Git command failed. Please ensure you are inside a Git repository.")
         return None, None, None, scope_title
 
-    students = defaultdict(lambda: {"commits": 0, "added": 0, "deleted": 0, "active_days": set()})
+    # Initialize all 4 members
+    students = OrderedDict()
+    for m in TEAM_MEMBERS:
+        students[m] = {"commits": 0, "added": 0, "deleted": 0, "active_days": set()}
+
     timeline_activity = defaultdict(lambda: defaultdict(int))
     student_logs = defaultdict(list)
     current_author = None
@@ -78,19 +103,26 @@ def get_git_metrics(interval="weekly"):
             parts = line.split('|||')
             if len(parts) >= 5:
                 sha = parts[1].strip()
-                author = parts[2].strip()
+                raw_author = parts[2].strip()
                 date_str = parts[3].strip()
                 msg = parts[4].strip()
             else:
                 continue
 
             # --- IGNORE AUTOMATED BOTS ---
-            if "bot" in author.lower() or "github-actions" in author.lower():
+            if "bot" in raw_author.lower() or "github-actions" in raw_author.lower():
                 current_author = None
                 continue
-            # -----------------------------
+
+            # Map author to official team members
+            mapped_author = AUTHOR_MAPPING.get(raw_author, AUTHOR_MAPPING.get(raw_author.lower(), None))
             
-            current_author = author
+            # Filter strictly to the 4 team members
+            if not mapped_author or mapped_author not in TEAM_MEMBERS:
+                current_author = None
+                continue
+
+            current_author = mapped_author
             current_date_str = date_str
             
             students[current_author]["commits"] += 1
@@ -139,7 +171,7 @@ def create_charts(students, timeline_activity, interval):
     # 2. Net LOC Bar Chart
     if authors:
         net_loc = [students[a]["added"] - students[a]["deleted"] for a in authors]
-        colors_list = ['#4E79A7', '#F28E2B', '#E15759', '#76B7B2', '#59A14F']
+        colors_list = ['#4E79A7', '#F28E2B', '#E15759', '#76B7B2', '#59A14F', '#EDC948']
         ax2.bar(authors, net_loc, color=colors_list[:len(authors)], width=0.45)
         ax2.set_title("Net Lines of Code Written", fontsize=10, fontweight='bold')
         ax2.set_ylabel("LOC (Added - Deleted)")
@@ -287,58 +319,72 @@ def generate_pdf(interval="weekly"):
 
     # 5. Detailed Commit Logs per Student WITH Vertically Merged Mentor Marks
     story.append(Paragraph(f"3. Detailed Commit Logs & Mentor Evaluation ({interval.capitalize()})", section_style))
-    if not student_logs:
-        story.append(Paragraph("<i>No commit logs found for this timeframe.</i>", styles['Normal']))
-    else:
-        for student_name, logs in student_logs.items():
-            student_section = []
-            student_section.append(Paragraph(f"<b>Student:</b> {html.escape(student_name)} — <i>{len(logs)} commit(s)</i>", sub_section_style))
-            
-            log_table_data = [["Date", "Hash", "Commit Message", "Mentor Marks (/10)"]]
-            
-            # Place the clean marking line in the first row
-            first_date, first_sha, first_msg = logs[0]
-            safe_msg = html.escape(first_msg) if first_msg else "(No commit message)"
-            log_table_data.append([
-                Paragraph(first_date, meta_cell_style),
-                Paragraph(f"<code>{first_sha}</code>", meta_cell_style),
-                Paragraph(safe_msg, msg_style),
+    for student_name in TEAM_MEMBERS:
+        logs = student_logs.get(student_name, [])
+        student_section = []
+        student_section.append(Paragraph(f"<b>Student:</b> {html.escape(student_name)} — <i>{len(logs)} commit(s)</i>", sub_section_style))
+        
+        if not logs:
+            no_commits_table = Table([[
+                Paragraph("No commits pushed in this evaluation window.", msg_style),
                 Paragraph("<b>_____ / 10</b>", marks_style)
-            ])
-            
-            # Subsequent commit rows have blank placeholder for merged cell
-            for date_val, sha_val, msg_val in logs[1:]:
-                safe_msg = html.escape(msg_val) if msg_val else "(No commit message)"
-                log_table_data.append([
-                    Paragraph(date_val, meta_cell_style),
-                    Paragraph(f"<code>{sha_val}</code>", meta_cell_style),
-                    Paragraph(safe_msg, msg_style),
-                    ""
-                ])
-            
-            num_rows = len(log_table_data)
-            log_table = Table(log_table_data, colWidths=[65, 50, 335, 90])
-            
-            t_style = [
-                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor("#475569")),
-                ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-                ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
-                ('ALIGN', (3, 0), (3, -1), 'CENTER'),
-                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-                ('FONTSIZE', (0, 0), (-1, -1), 7.5),
-                ('BOTTOMPADDING', (0, 0), (-1, -1), 2.5),
-                ('TOPPADDING', (0, 0), (-1, -1), 2.5),
+            ]], colWidths=[450, 90])
+            no_commits_table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (0, 0), colors.white),
+                ('BACKGROUND', (1, 0), (1, 0), colors.HexColor("#FEF3C7")),
                 ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor("#CBD5E1")),
-                ('ROWBACKGROUNDS', (0, 1), (2, -1), [colors.white, colors.HexColor("#F8FAFC")]),
-                ('SPAN', (3, 1), (3, num_rows - 1)),               # Vertically merge mentor marks column
-                ('VALIGN', (3, 1), (3, num_rows - 1), 'MIDDLE'),     # Vertically center the marks line
-                ('BACKGROUND', (3, 1), (3, num_rows - 1), colors.HexColor("#FEF3C7")), # Accent for marks area
-            ]
-            
-            log_table.setStyle(TableStyle(t_style))
-            student_section.append(log_table)
+                ('ALIGN', (1, 0), (1, 0), 'CENTER'),
+                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                ('TOPPADDING', (0, 0), (-1, -1), 4),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+            ]))
+            student_section.append(no_commits_table)
             student_section.append(Spacer(1, 5))
             story.append(KeepTogether(student_section))
+            continue
+
+        log_table_data = [["Date", "Hash", "Commit Message", "Mentor Marks (/10)"]]
+        first_date, first_sha, first_msg = logs[0]
+        safe_msg = html.escape(first_msg) if first_msg else "(No commit message)"
+        log_table_data.append([
+            Paragraph(first_date, meta_cell_style),
+            Paragraph(f"<code>{first_sha}</code>", meta_cell_style),
+            Paragraph(safe_msg, msg_style),
+            Paragraph("<b>_____ / 10</b>", marks_style)
+        ])
+        
+        for date_val, sha_val, msg_val in logs[1:]:
+            safe_msg = html.escape(msg_val) if msg_val else "(No commit message)"
+            log_table_data.append([
+                Paragraph(date_val, meta_cell_style),
+                Paragraph(f"<code>{sha_val}</code>", meta_cell_style),
+                Paragraph(safe_msg, msg_style),
+                ""
+            ])
+        
+        num_rows = len(log_table_data)
+        log_table = Table(log_table_data, colWidths=[65, 50, 335, 90])
+        
+        t_style = [
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor("#475569")),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+            ('ALIGN', (3, 0), (3, -1), 'CENTER'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, -1), 7.5),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 2.5),
+            ('TOPPADDING', (0, 0), (-1, -1), 2.5),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor("#CBD5E1")),
+            ('ROWBACKGROUNDS', (0, 1), (2, -1), [colors.white, colors.HexColor("#F8FAFC")]),
+            ('SPAN', (3, 1), (3, num_rows - 1)),               # Vertically merge mentor marks column
+            ('VALIGN', (3, 1), (3, num_rows - 1), 'MIDDLE'),     # Vertically center the marks line
+            ('BACKGROUND', (3, 1), (3, num_rows - 1), colors.HexColor("#FEF3C7")), # Accent for marks area
+        ]
+        
+        log_table.setStyle(TableStyle(t_style))
+        student_section.append(log_table)
+        student_section.append(Spacer(1, 5))
+        story.append(KeepTogether(student_section))
 
     # 6. Symmetrical Signatures
     story.append(Spacer(1, 16))

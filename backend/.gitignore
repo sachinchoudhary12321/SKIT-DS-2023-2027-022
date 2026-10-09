@@ -19,7 +19,7 @@ env/
 htmlcov/
 
 # uploaded images — never commit user data
-storage/
+/storage/
 ml_models/
 *.pt
 *.pth
